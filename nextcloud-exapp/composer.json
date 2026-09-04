@@ -1,0 +1,14 @@
+{
+  "name": "henmohr/watchgroups-nextcloud",
+  "description": "Nextcloud 35 app that surfaces WhatsApp group monitoring data.",
+  "type": "project",
+  "license": "AGPL-3.0-or-later",
+  "require": {
+    "php": "^8.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "OCA\\WatchGroups\\": "lib/"
+    }
+  }
+}

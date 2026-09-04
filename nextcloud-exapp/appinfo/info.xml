@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+  <id>watchgroups</id>
+  <name>Watch Groups WhatsApp</name>
+  <summary>Monitor WhatsApp groups and surface conversation summaries in Nextcloud.</summary>
+  <description><![CDATA[
+    Connects to a Baileys-based watcher and surfaces monitored WhatsApp group activity,
+    summaries, and conversation context inside Nextcloud.
+  ]]></description>
+  <version>0.1.0</version>
+  <licence>agpl</licence>
+  <author>Henmohr</author>
+  <category>integration</category>
+  <navigation>
+    <name>Watch Groups</name>
+    <route>watchgroups.dashboard.index</route>
+    <order>10</order>
+  </navigation>
+  <dependencies>
+    <nextcloud min-version="35" max-version="35" />
+  </dependencies>
+  <external-app>
+    <docker-install>
+      <registry>ghcr.io</registry>
+      <image>henmohr/watchgroups</image>
+      <image-tag>latest</image-tag>
+    </docker-install>
+    <routes>
+      <route>
+        <url>.*</url>
+        <verb>GET,POST,PUT,DELETE,PATCH</verb>
+        <access_level>USER</access_level>
+        <headers_to_exclude>[]</headers_to_exclude>
+        <bruteforce_protection>[401, 500]</bruteforce_protection>
+      </route>
+    </routes>
+  </external-app>
+</info>

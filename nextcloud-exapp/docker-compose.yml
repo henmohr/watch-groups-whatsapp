@@ -1,0 +1,38 @@
+services:
+  watcher:
+    image: watch-groups-whatsapp-watcher:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      DATA_DIR: /app/data
+      AUTH_DIR: /app/data/auth
+      SUMMARY_DIR: /app/data/summaries
+      LOG_FILE: /app/data/conversas.jsonl
+      SUMMARY_FILE: /app/data/conhecimento.md
+      GROUP_IDS: ${GROUP_IDS:-}
+      GROUP_NAMES: ${GROUP_NAMES:-}
+      INCLUDE_SELF: ${INCLUDE_SELF:-1}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      SUMMARY_INTERVAL_SECONDS: ${SUMMARY_INTERVAL_SECONDS:-300}
+      SUMMARY_MIN_MESSAGES: ${SUMMARY_MIN_MESSAGES:-5}
+      DASHBOARD_ENABLED: ${DASHBOARD_ENABLED:-1}
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-3000}
+      DASHBOARD_HOST: ${DASHBOARD_HOST:-0.0.0.0}
+    volumes:
+      - ../data:/app/data
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  exapp-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: ["php", "-l", "lib/Controller/DashboardController.php"]

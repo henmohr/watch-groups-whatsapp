@@ -1,0 +1,72 @@
+.watchgroups-app {
+  padding: 24px;
+}
+
+.watchgroups-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: var(--color-text-max);
+}
+
+.watchgroups-empty,
+.watchgroups-card {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-main-background);
+}
+
+.watchgroups-empty {
+  padding: 16px;
+}
+
+.watchgroups-error {
+  border-color: var(--color-error);
+}
+
+.watchgroups-error-detail {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.watchgroups-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.watchgroups-card {
+  padding: 16px;
+}
+
+.watchgroups-subtitle,
+.watchgroups-muted {
+  color: var(--color-text-max);
+  opacity: 0.65;
+}
+
+.watchgroups-summary {
+  white-space: pre-wrap;
+  margin-bottom: 16px;
+}
+
+.watchgroups-messages {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.watchgroups-messages li {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--color-background-dark);
+}
+
+.watchgroups-messages small {
+  display: block;
+  opacity: 0.65;
+}
