@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import base64
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -117,6 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/enabled":
             query = urllib.parse.parse_qs(parsed.query)
             enabled = query.get("enabled", ["1"])[0] not in {"0", "false", "False"}
+            print(f"/enabled called with enabled={enabled}")
 
             try:
                 if enabled:
@@ -177,12 +179,16 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                print(f"Nextcloud {method} {path} -> HTTP {response.status}: {body[:1000]}")
                 if response.status >= 400:
                     raise RuntimeError(f"Nextcloud returned HTTP {response.status}")
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
+            print(f"Nextcloud {method} {path} -> HTTP {error.code}: {body[:1000]}")
             raise RuntimeError(f"Nextcloud returned HTTP {error.code}: {body}") from error
         except urllib.error.URLError as error:
+            print(f"Nextcloud {method} {path} -> URLError: {error}")
             raise RuntimeError(f"Failed to contact Nextcloud: {error}") from error
 
     def _appapi_headers(self) -> dict[str, str]:
@@ -193,6 +199,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if not auth:
             raise RuntimeError("Missing AUTHORIZATION-APP-API header")
+
+        try:
+            decoded_user = base64.b64decode(auth).decode("utf-8", errors="replace")
+            print(f"AppAPI auth user/secret token: {decoded_user.split(':', 1)[0]}")
+        except Exception:
+            print("AppAPI auth token present but could not be decoded")
 
         return {
             "AA-VERSION": aa_version,
@@ -345,7 +357,7 @@ def render_dashboard() -> str:
   <script>
     function apiBase() {{
       return window.location.pathname.replace(
-        /\/embedded\/watchgroups\/watchgroups-dashboard\/?$/,
+        /\\/embedded\\/watchgroups\\/watchgroups-dashboard\\/?$/,
         '/proxy/watchgroups/'
       );
     }}
