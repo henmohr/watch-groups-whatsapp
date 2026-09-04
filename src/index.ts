@@ -60,8 +60,12 @@ const summaryIndex = new Map<string, SummaryRecord>();
 let summaryInProgress = false;
 let activeSocket: ReturnType<typeof makeWASocket> | null = null;
 let summaryTimer: NodeJS.Timeout | null = null;
+let groupsRefreshTimer: NodeJS.Timeout | null = null;
+let groupsRefreshBackoffMs = 60_000;
+let lastGroupsRefreshAt = 0;
 let groupsResolved = false;
 let connectionStatus: 'starting' | 'connecting' | 'open' | 'closed' | 'logged_out' = 'starting';
+const groupsRefreshMinIntervalMs = numberEnv('GROUPS_REFRESH_MIN_INTERVAL_SECONDS', 900) * 1000;
 
 type SummaryRecord = {
   groupId: string;
@@ -123,11 +127,7 @@ async function connectLoop() {
     if (update.connection === 'open') {
       connectionStatus = 'open';
       console.log('WhatsApp connected');
-      try {
-        await refreshWatchedGroups(sock);
-      } catch (error) {
-        console.error('Failed to refresh watched groups:', error);
-      }
+      scheduleWatchedGroupsRefresh(sock, 0, true);
       return;
     }
 
@@ -151,9 +151,7 @@ async function connectLoop() {
   });
 
   sock.ev.on('groups.update', () => {
-    void refreshWatchedGroups(sock).catch((error) => {
-      console.error('Failed to refresh watched groups:', error);
-    });
+    scheduleWatchedGroupsRefresh(sock, 60_000, false);
   });
 
   sock.ev.on('messages.upsert', async (event) => {
@@ -172,7 +170,44 @@ async function connectLoop() {
 
 }
 
-async function refreshWatchedGroups(sock: ReturnType<typeof makeWASocket>) {
+function scheduleWatchedGroupsRefresh(
+  sock: ReturnType<typeof makeWASocket>,
+  delayMs = 0,
+  force = false,
+) {
+  if (groupsRefreshTimer) {
+    clearTimeout(groupsRefreshTimer);
+  }
+
+  groupsRefreshTimer = setTimeout(() => {
+    void refreshWatchedGroups(sock, force).catch((error) => {
+      if (isRateLimitError(error)) {
+        const nextDelay = groupsRefreshBackoffMs;
+        groupsRefreshBackoffMs = Math.min(groupsRefreshBackoffMs * 2, 30 * 60 * 1000);
+        console.error(
+          `Failed to refresh watched groups due to rate limit. Retrying in ${Math.round(nextDelay / 1000)}s:`,
+          error,
+        );
+        scheduleWatchedGroupsRefresh(sock, nextDelay, true);
+        return;
+      }
+
+      console.error('Failed to refresh watched groups:', error);
+    });
+  }, delayMs);
+
+  groupsRefreshTimer.unref();
+}
+
+async function refreshWatchedGroups(sock: ReturnType<typeof makeWASocket>, force = false) {
+  const now = Date.now();
+  if (!force && lastGroupsRefreshAt > 0 && now - lastGroupsRefreshAt < groupsRefreshMinIntervalMs) {
+    console.log(
+      `Skipping watched groups refresh; last refresh was ${Math.round((now - lastGroupsRefreshAt) / 1000)}s ago`,
+    );
+    return;
+  }
+
   const participating = await sock.groupFetchAllParticipating();
   const allGroups = Object.values(participating).map((group: any) => ({
     id: group.id,
@@ -202,10 +237,17 @@ async function refreshWatchedGroups(sock: ReturnType<typeof makeWASocket>) {
   }
 
   groupsResolved = true;
+  lastGroupsRefreshAt = Date.now();
+  groupsRefreshBackoffMs = 60_000;
   console.log(`Watching ${watchedGroups.size} group(s)`);
   for (const group of watchedGroups.values()) {
     console.log(`- ${group.subject} (${group.id})`);
   }
+}
+
+function isRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('rate-overlimit') || message.includes('429');
 }
 
 async function handleIncomingMessage(sock: ReturnType<typeof makeWASocket>, message: any) {
