@@ -19,6 +19,20 @@ APP_SECRET = os.environ.get("APP_SECRET", "")
 NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "").rstrip("/")
 PERSISTENT_STORAGE = Path(os.environ.get("APP_PERSISTENT_STORAGE", "/tmp/watchgroups"))
 TOP_MENU_NAME = "watchgroups-dashboard"
+ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" role=\"img\" aria-label=\"Watch Groups\">
+  <defs>
+    <linearGradient id=\"g\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">
+      <stop offset=\"0%\" stop-color=\"#22c55e\"/>
+      <stop offset=\"100%\" stop-color=\"#0f172a\"/>
+    </linearGradient>
+  </defs>
+  <rect width=\"64\" height=\"64\" rx=\"16\" fill=\"url(#g)\"/>
+  <path d=\"M18 22h28a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H30l-10 8v-8h-2a4 4 0 0 1-4-4V26a4 4 0 0 1 4-4z\" fill=\"rgba(15,23,42,.92)\"/>
+  <circle cx=\"26\" cy=\"32\" r=\"3\" fill=\"#e5e7eb\"/>
+  <circle cx=\"32\" cy=\"32\" r=\"3\" fill=\"#e5e7eb\" opacity=\".85\"/>
+  <circle cx=\"38\" cy=\"32\" r=\"3\" fill=\"#e5e7eb\" opacity=\".7\"/>
+</svg>
+"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -46,6 +60,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/heartbeat":
             self._send_text(200, "ok")
+            return
+
+        if self.path == "/img/icon.svg":
+            data = ICON_SVG.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
 
         if self.path == "/":
@@ -105,6 +128,8 @@ class Handler(BaseHTTPRequestHandler):
             {
                 "name": TOP_MENU_NAME,
                 "displayName": APP_DISPLAY_NAME,
+                "icon": "img/icon.svg",
+                "adminRequired": "0",
             },
         )
 
@@ -278,7 +303,7 @@ def render_dashboard() -> str:
 
   <script>
     async function refresh() {{
-      const res = await fetch('/api/state');
+      const res = await fetch('api/state');
       const data = await res.json();
       document.getElementById('status').textContent = data.connectionStatus;
       document.getElementById('statusDot').className = 'dot ' + (data.connectionStatus === 'open' ? 'open' : '');
