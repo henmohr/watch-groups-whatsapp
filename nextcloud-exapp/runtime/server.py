@@ -17,6 +17,7 @@ APP_DISPLAY_NAME = os.environ.get("APP_DISPLAY_NAME", "Watch Groups WhatsApp")
 APP_VERSION = os.environ.get("APP_VERSION", "0.1.0")
 APP_SECRET = os.environ.get("APP_SECRET", "")
 NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "").rstrip("/")
+WATCHER_API_URL = os.environ.get("WATCHER_API_URL", "http://watcher:3000").rstrip("/")
 PERSISTENT_STORAGE = Path(os.environ.get("APP_PERSISTENT_STORAGE", "/tmp/watchgroups"))
 TOP_MENU_NAME = "watchgroups-dashboard"
 ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" role=\"img\" aria-label=\"Watch Groups\">
@@ -54,12 +55,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_watcher_json_error(self, status: int, message: str) -> None:
+        self._send_json(status, {"error": message})
+
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         print(f"{self.address_string()} - {format % args}")
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/heartbeat":
             self._send_text(200, "ok")
+            return
+
+        if self.path == "/api/state":
+            self._proxy_watcher_json("/api/state")
+            return
+
+        if self.path == "/api/summaries":
+            self._proxy_watcher_json("/api/summaries")
             return
 
         if self.path == "/img/icon.svg":
@@ -189,6 +201,35 @@ class Handler(BaseHTTPRequestHandler):
             "AUTHORIZATION-APP-API": auth,
         }
 
+    def _proxy_watcher_json(self, path: str) -> None:
+        if not WATCHER_API_URL:
+            self._send_watcher_json_error(503, "WATCHER_API_URL not configured")
+            return
+
+        request = urllib.request.Request(
+            f"{WATCHER_API_URL}{path}",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                body = response.read()
+                self.send_response(response.status)
+                self.send_header(
+                    "Content-Type",
+                    response.headers.get("Content-Type", "application/json; charset=utf-8"),
+                )
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            self._send_watcher_json_error(error.code, body or error.reason)
+        except urllib.error.URLError as error:
+            self._send_watcher_json_error(503, f"Failed to contact watcher: {error}")
+
 
 def main() -> None:
     PERSISTENT_STORAGE.mkdir(parents=True, exist_ok=True)
@@ -302,8 +343,15 @@ def render_dashboard() -> str:
   </div>
 
   <script>
+    function apiBase() {{
+      return window.location.pathname.replace(
+        /\/embedded\/watchgroups\/watchgroups-dashboard\/?$/,
+        '/proxy/watchgroups/'
+      );
+    }}
+
     async function refresh() {{
-      const res = await fetch('api/state');
+      const res = await fetch(apiBase() + 'api/state', {{ cache: 'no-store' }});
       const data = await res.json();
       document.getElementById('status').textContent = data.connectionStatus;
       document.getElementById('statusDot').className = 'dot ' + (data.connectionStatus === 'open' ? 'open' : '');
