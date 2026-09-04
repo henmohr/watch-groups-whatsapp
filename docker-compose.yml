@@ -2,6 +2,8 @@ services:
   watcher:
     build:
       context: .
+    networks:
+      - nextcloud
     environment:
       DATA_DIR: ${DATA_DIR:-/app/data}
       AUTH_DIR: ${AUTH_DIR:-/app/data/auth}
@@ -27,3 +29,8 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
+
+networks:
+  nextcloud:
+    external: true
+    name: ${NEXTCLOUD_NETWORK:-internal}

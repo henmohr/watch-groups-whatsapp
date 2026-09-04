@@ -31,3 +31,5 @@ make -C nextcloud-exapp daemon-register NEXTCLOUD_URL=https://nextcloud.example
 make -C nextcloud-exapp app-register-manual
 make -C nextcloud-exapp app-enable
 ```
+
+If the Nextcloud Docker network is named `internal`, the default helper already uses it.

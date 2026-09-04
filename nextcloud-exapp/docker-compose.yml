@@ -4,6 +4,8 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    networks:
+      - nextcloud
     environment:
       DATA_DIR: /app/data
       AUTH_DIR: /app/data/auth
@@ -36,3 +38,8 @@ services:
     volumes:
       - .:/app
     command: ["php", "-l", "lib/Controller/DashboardController.php"]
+
+networks:
+  nextcloud:
+    external: true
+    name: ${NEXTCLOUD_NETWORK:-internal}

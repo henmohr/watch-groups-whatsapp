@@ -16,6 +16,12 @@ docker compose up --build
 
 If you want to watch only specific groups, set `GROUP_IDS` or `GROUP_NAMES` in `.env`.
 
+To connect the watcher to the same Docker network as Nextcloud, set:
+
+```bash
+NEXTCLOUD_NETWORK=internal
+```
+
 Examples:
 
 ```bash

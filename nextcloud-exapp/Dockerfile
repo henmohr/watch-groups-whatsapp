@@ -1,7 +1,9 @@
-FROM php:8.1-cli-alpine
+FROM python:3.12-alpine
 
 WORKDIR /app
 
-COPY . .
+COPY runtime ./runtime
 
-CMD ["php", "-v"]
+EXPOSE 8000
+
+CMD ["python", "/app/runtime/server.py"]
