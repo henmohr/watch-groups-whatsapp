@@ -84,7 +84,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
 
-        if self.path == "/":
+        if self.path == "/" or self.path == "/watchgroups-dashboard/" or self.path == "/index.html":
+            self._send_text(200, render_dashboard())
+            return
+
+        if self.path.startswith("/watchgroups-dashboard/"):
             self._send_text(200, render_dashboard())
             return
 
