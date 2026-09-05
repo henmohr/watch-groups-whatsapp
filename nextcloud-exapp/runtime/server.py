@@ -75,6 +75,13 @@ TOP_MENU_SCRIPT_JS = r"""
   }
 
   function mount() {
+    // AppAPI's embedded route is only a shell. Open the authenticated ExApp
+    // proxy directly so the dashboard does not depend on iframe mounting.
+    if (/\/apps\/app_api\/embedded\/watchgroups\/watchgroups-dashboard\/?$/.test(window.location.pathname)) {
+      window.location.replace(window.location.origin + proxyRoot());
+      return;
+    }
+
     var target = document.getElementById('content') || document.body;
     if (!target) {
       return;
