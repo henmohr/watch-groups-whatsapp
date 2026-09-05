@@ -1,4 +1,5 @@
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createHmac, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
@@ -47,6 +48,11 @@ const summaryMinMessages = numberEnv('SUMMARY_MIN_MESSAGES', 5);
 const dashboardEnabled = envFlag('DASHBOARD_ENABLED', true);
 const dashboardPort = numberEnv('DASHBOARD_PORT', 3000);
 const dashboardHost = process.env.DASHBOARD_HOST ?? '0.0.0.0';
+const nextcloudTalkUrl = process.env.NEXTCLOUD_TALK_URL?.trim().replace(/\/$/, '') ?? '';
+const nextcloudTalkBotSecret = process.env.NEXTCLOUD_TALK_BOT_SECRET?.trim() ?? '';
+const nextcloudTalkConversationToken = process.env.NEXTCLOUD_TALK_CONVERSATION_TOKEN?.trim() ?? '';
+const nextcloudTalkConversationMap = parseTalkConversationMap(process.env.NEXTCLOUD_TALK_CONVERSATION_MAP ?? '');
+const nextcloudTalkPublish = envFlag('NEXTCLOUD_TALK_PUBLISH', Boolean(nextcloudTalkUrl));
 const groupIds = parseCsv(process.env.GROUP_IDS ?? process.env.GROUP_ID);
 const groupNames = parseCsv(process.env.GROUP_NAMES ?? process.env.GROUP_NAME).map((value) => value.toLowerCase());
 
@@ -406,6 +412,7 @@ async function flushSummaries(sock: ReturnType<typeof makeWASocket>) {
       try {
         const summary = await summarizeGroup(group, messages);
         await persistSummary(group, messages, summary);
+        await publishSummaryToTalk(group, summary);
         bufferedMessages.delete(groupId);
       } catch (error) {
         console.error(`Summary failed for ${group.subject}:`, error);
@@ -530,6 +537,80 @@ async function persistSummary(group: WatchedGroup, messages: BufferedMessage[], 
   });
 
   console.log(`Summary written for ${group.subject}`);
+}
+
+function parseTalkConversationMap(value: string) {
+  const entries: Array<[string, string]> = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const separator = entry.indexOf('=');
+      return (separator > 0
+        ? [entry.slice(0, separator).trim(), entry.slice(separator + 1).trim()]
+        : ['', '']) as [string, string];
+    })
+    .filter(([groupId, token]) => Boolean(groupId && token));
+  return new Map<string, string>(entries);
+}
+
+function getTalkConversationToken(groupId: string) {
+  return nextcloudTalkConversationMap.get(groupId) ?? nextcloudTalkConversationToken;
+}
+
+async function publishSummaryToTalk(group: WatchedGroup, summary: string) {
+  if (!nextcloudTalkPublish || !nextcloudTalkUrl) {
+    return;
+  }
+
+  const token = getTalkConversationToken(group.id);
+  if (!token) {
+    return;
+  }
+
+  if (!nextcloudTalkBotSecret) {
+    console.error('Talk publication skipped: NEXTCLOUD_TALK_BOT_SECRET is missing');
+    return;
+  }
+
+  const message = [
+    `## Resumo do WhatsApp: ${group.subject}`,
+    '',
+    summary.trim(),
+    '',
+    `_Gerado automaticamente em ${new Date().toLocaleString('pt-BR')}_`,
+  ].join('\n');
+  const body = JSON.stringify({ message });
+  const random = randomBytes(32).toString('hex');
+  const signature = createHmac('sha256', nextcloudTalkBotSecret)
+    .update(random + body)
+    .digest('hex');
+
+  try {
+    const response = await fetch(
+      `${nextcloudTalkUrl}/ocs/v2.php/apps/spreed/api/v1/bot/${encodeURIComponent(token)}/message`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'OCS-APIRequest': 'true',
+          'X-Nextcloud-Talk-Bot-Random': random,
+          'X-Nextcloud-Talk-Bot-Signature': signature,
+        },
+        body,
+      },
+    );
+
+    if (!response.ok) {
+      console.error(`Talk publication failed for ${group.subject}: HTTP ${response.status} ${await response.text()}`);
+      return;
+    }
+
+    console.log(`Summary published to Talk for ${group.subject}`);
+  } catch (error) {
+    console.error(`Talk publication failed for ${group.subject}:`, error);
+  }
 }
 
 async function appendJsonLine(filePath: string, payload: unknown) {
@@ -686,143 +767,498 @@ function renderDashboardHtml() {
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-2: #1f2937;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #22c55e;
-      --border: #334155;
-      --warning: #f59e0b;
+      --bg: #08111f;
+      --panel: rgba(10, 17, 31, 0.88);
+      --panel-strong: rgba(15, 23, 42, 0.96);
+      --panel-soft: rgba(148, 163, 184, 0.08);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #34d399;
+      --accent-2: #60a5fa;
+      --border: rgba(148, 163, 184, 0.2);
+      --warning: #fbbf24;
+      --danger: #fb7185;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: radial-gradient(circle at top, #1e293b, var(--bg) 45%);
       color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.2), transparent 32%),
+        radial-gradient(circle at top right, rgba(52, 211, 153, 0.16), transparent 28%),
+        linear-gradient(180deg, #08111f 0%, #0f172a 100%);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 20px 48px; }
-    header { display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; }
-    h1 { margin: 0; font-size: 28px; }
-    .sub { color: var(--muted); margin-top: 8px; }
-    .pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 8px 12px; border-radius: 999px;
-      background: rgba(17,24,39,.7); border: 1px solid var(--border);
-      font-size: 14px;
+    .wrap {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
     }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warning); }
-    .dot.open { background: var(--accent); }
-    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+    .sub {
+      margin-top: 10px;
+      color: var(--muted);
+      max-width: 72ch;
+      line-height: 1.5;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.75);
+      border-radius: 999px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+    }
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+      background: var(--warning);
+      box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.16);
+    }
+    .dot.open {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.16);
+    }
+    .dot.closed,
+    .dot.logged_out {
+      background: var(--danger);
+      box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.16);
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin: 18px 0 14px;
+    }
+    .toolbar input,
+    .toolbar select,
+    .toolbar button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.82);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font: inherit;
+      min-height: 46px;
+    }
+    .toolbar input {
+      flex: 1 1 280px;
+      min-width: 0;
+    }
+    .toolbar select {
+      flex: 0 0 220px;
+    }
+    .toolbar button {
+      cursor: pointer;
+      background: linear-gradient(135deg, rgba(52, 211, 153, 0.18), rgba(96, 165, 250, 0.18));
+    }
+    .toolbar button:hover {
+      border-color: rgba(148, 163, 184, 0.4);
+      transform: translateY(-1px);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 16px;
+    }
     .card {
-      background: rgba(17,24,39,.88);
-      border: 1px solid rgba(51,65,85,.9);
-      border-radius: 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 22px;
       padding: 18px;
-      box-shadow: 0 20px 40px rgba(0,0,0,.2);
+      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.18);
+      backdrop-filter: blur(14px);
     }
+    .span-3 { grid-column: span 3; }
     .span-4 { grid-column: span 4; }
-    .span-6 { grid-column: span 6; }
+    .span-5 { grid-column: span 5; }
+    .span-7 { grid-column: span 7; }
     .span-8 { grid-column: span 8; }
     .span-12 { grid-column: span 12; }
-    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-    .value { font-size: 18px; margin-top: 8px; }
-    .group-list { display: grid; gap: 12px; }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+    .helper {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      margin-bottom: 12px;
+    }
+    .section-title h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .summary-list,
+    .group-list {
+      display: grid;
+      gap: 12px;
+    }
+    .summary-item,
     .group {
-      background: rgba(31,41,55,.7);
-      border: 1px solid rgba(51,65,85,.9);
-      border-radius: 16px;
+      background: var(--panel-strong);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 18px;
       padding: 16px;
     }
-    .group h3 { margin: 0 0 8px; font-size: 18px; }
-    .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 12px; }
-    .summary { white-space: pre-wrap; margin-top: 12px; line-height: 1.55; color: #dbe4ee; }
-    .messages { display: grid; gap: 8px; margin-top: 12px; }
-    .msg { padding: 10px 12px; background: rgba(15,23,42,.85); border-radius: 12px; border: 1px solid rgba(51,65,85,.75); }
-    .msg small { color: var(--muted); display: block; margin-bottom: 4px; }
-    @media (max-width: 900px) {
-      .span-4, .span-6, .span-8 { grid-column: span 12; }
+    .summary-item h3,
+    .group h3 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+    .summary-meta,
+    .meta {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+    }
+    .preview {
+      margin-top: 12px;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      color: #dbe4ee;
+    }
+    .messages {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .msg {
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.5);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+    }
+    .msg small {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+    }
+    .empty {
+      padding: 16px;
+      border-radius: 16px;
+      background: rgba(2, 6, 23, 0.45);
+      border: 1px dashed rgba(148, 163, 184, 0.28);
+      color: var(--muted);
+    }
+    .error {
+      border-color: rgba(251, 113, 133, 0.5);
+      color: #fecdd3;
+    }
+    @media (max-width: 1100px) {
+      .span-3, .span-4, .span-5, .span-7, .span-8 { grid-column: span 12; }
+      .toolbar select { flex: 1 1 220px; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
+    <div class="hero">
       <div>
         <h1>Watch Groups WhatsApp</h1>
-        <div class="sub">Dashboard local para grupos acompanhados e resumos gerados.</div>
+        <div class="sub">Dashboard da monitoração dos grupos. Use a busca para localizar um grupo, revisar resumos recentes e acompanhar o estado da conexão.</div>
       </div>
-      <div class="pill"><span class="dot ${connectionStatus === 'open' ? 'open' : ''}"></span><span id="status">${connectionStatus}</span></div>
-    </header>
+      <div class="status">
+        <span class="dot ${connectionStatus}"></span>
+        <strong id="status">${connectionStatus}</strong>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <input id="searchInput" type="search" placeholder="Buscar por grupo, ID, mensagem ou resumo" />
+      <select id="groupFilter">
+        <option value="all">Todos os grupos</option>
+        <option value="with-summary">Com resumo</option>
+        <option value="without-summary">Sem resumo</option>
+        <option value="with-messages">Com mensagens recentes</option>
+      </select>
+      <button type="button" id="refreshBtn">Atualizar agora</button>
+    </div>
 
     <section class="grid">
-      <div class="card span-4">
+      <div class="card span-3">
         <div class="label">Grupos acompanhados</div>
         <div class="value" id="watchedCount">${watchedGroups.size}</div>
+        <div class="helper">Total de grupos observados pelo Baileys nesta sessão.</div>
       </div>
-      <div class="card span-4">
+      <div class="card span-3">
         <div class="label">Resumos prontos</div>
         <div class="value" id="summaryCount">${summaryIndex.size}</div>
+        <div class="helper">Grupos com resumo consolidado disponível.</div>
       </div>
-      <div class="card span-4">
+      <div class="card span-3">
+        <div class="label">Mensagens recentes</div>
+        <div class="value" id="messageCount">0</div>
+        <div class="helper">Soma das mensagens visíveis na janela atual.</div>
+      </div>
+      <div class="card span-3">
         <div class="label">Última atualização</div>
         <div class="value" id="updatedAt">${new Date().toLocaleString('pt-BR')}</div>
+        <div class="helper">Horário do último snapshot retornado pelo watcher.</div>
       </div>
 
-      <div class="card span-12">
-        <div class="label">Grupos</div>
+      <div class="card span-5">
+        <div class="section-title">
+          <h2>Resumo do momento</h2>
+          <span class="muted" id="summaryWindow"></span>
+        </div>
+        <div class="summary-list" id="summaryFeed"></div>
+      </div>
+
+      <div class="card span-7">
+        <div class="section-title">
+          <h2>Grupos monitorados</h2>
+          <span class="muted" id="visibleCount"></span>
+        </div>
         <div class="group-list" id="groups"></div>
       </div>
     </section>
   </div>
 
   <script>
-    async function refresh() {
-      const res = await fetch('/api/state');
-      const data = await res.json();
-      document.getElementById('status').textContent = data.connectionStatus;
-      document.getElementById('watchedCount').textContent = data.watchedCount;
-      document.getElementById('summaryCount').textContent = data.groups.filter(g => g.latestSummary).length;
-      document.getElementById('updatedAt').textContent = new Date(data.generatedAt).toLocaleString('pt-BR');
+    const state = {
+      data: null,
+      search: '',
+      filter: 'all',
+    };
 
-      const container = document.getElementById('groups');
-      container.innerHTML = '';
-      if (!data.groups.length) {
-        container.innerHTML = '<div class="group">Nenhum grupo carregado ainda. Espere a conexão com o WhatsApp.</div>';
-        return;
-      }
+    const elements = {
+      status: document.getElementById('status'),
+      watchedCount: document.getElementById('watchedCount'),
+      summaryCount: document.getElementById('summaryCount'),
+      messageCount: document.getElementById('messageCount'),
+      updatedAt: document.getElementById('updatedAt'),
+      summaryWindow: document.getElementById('summaryWindow'),
+      visibleCount: document.getElementById('visibleCount'),
+      summaryFeed: document.getElementById('summaryFeed'),
+      groups: document.getElementById('groups'),
+      searchInput: document.getElementById('searchInput'),
+      groupFilter: document.getElementById('groupFilter'),
+      refreshBtn: document.getElementById('refreshBtn'),
+    };
 
-      data.groups.forEach((group) => {
-        const el = document.createElement('div');
-        el.className = 'group';
-        const summaryText = group.latestSummary ? escapeHtml(group.latestSummary.preview) : 'Sem resumo ainda.';
-        const messagesHtml = group.recentMessages.slice().reverse().map((msg) => {
-          return '<div class="msg">' +
-            '<small>' + escapeHtml(msg.ts + ' · ' + (msg.senderName || msg.sender || 'unknown')) + '</small>' +
-            '<div>' + escapeHtml(msg.text || '[sem texto]') + '</div>' +
-          '</div>';
-        }).join('');
-        el.innerHTML =
-          '<h3>' + escapeHtml(group.subject) + '</h3>' +
-          '<div class="meta">' +
-            '<span>ID: ' + escapeHtml(group.id) + '</span>' +
-            '<span>Mensagens recentes: ' + group.recentMessages.length + '</span>' +
-            '<span>Resumo: ' + (group.latestSummary ? 'sim' : 'não') + '</span>' +
-          '</div>' +
-          '<div class="summary">' + summaryText + '</div>' +
-          '<div class="messages">' + messagesHtml + '</div>';
-        container.appendChild(el);
-      });
-    }
+    elements.searchInput.addEventListener('input', (event) => {
+      state.search = event.target.value.trim().toLowerCase();
+      render();
+    });
+
+    elements.groupFilter.addEventListener('change', (event) => {
+      state.filter = event.target.value;
+      render();
+    });
+
+    elements.refreshBtn.addEventListener('click', () => {
+      void refresh();
+    });
 
     function escapeHtml(value) {
-      return value
+      return String(value)
         .replaceAll('&', '&amp;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) {
+        return 'sem data';
+      }
+
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('pt-BR');
+    }
+
+    function matchesSearch(group) {
+      if (!state.search) {
+        return true;
+      }
+
+      const haystack = [
+        group.subject,
+        group.id,
+        group.latestSummary?.preview ?? '',
+        ...(group.recentMessages ?? []).map((message) => message.text ?? ''),
+      ].join(' ').toLowerCase();
+
+      return haystack.includes(state.search);
+    }
+
+    function matchesFilter(group) {
+      if (state.filter === 'with-summary') {
+        return Boolean(group.latestSummary);
+      }
+
+      if (state.filter === 'without-summary') {
+        return !group.latestSummary;
+      }
+
+      if (state.filter === 'with-messages') {
+        return (group.recentMessages ?? []).length > 0;
+      }
+
+      return true;
+    }
+
+    function getVisibleGroups() {
+      return (state.data?.groups ?? [])
+        .filter(matchesSearch)
+        .filter(matchesFilter)
+        .sort((a, b) => {
+          const aAt = a.latestSummary?.generatedAt ?? '';
+          const bAt = b.latestSummary?.generatedAt ?? '';
+          return bAt.localeCompare(aAt);
+        });
+    }
+
+    function buildSummaryFeed(groups) {
+      const summaries = groups
+        .filter((group) => group.latestSummary)
+        .sort((a, b) => b.latestSummary.generatedAt.localeCompare(a.latestSummary.generatedAt))
+        .slice(0, 6);
+
+      if (!summaries.length) {
+        return '<div class="empty">Nenhum resumo disponível ainda. Quando o Groq processar a primeira janela, eles aparecerão aqui.</div>';
+      }
+
+      return summaries.map((group) => {
+        return [
+          '<article class="summary-item">',
+          '<h3>' + escapeHtml(group.subject) + '</h3>',
+          '<div class="summary-meta">',
+          '<span class="pill">ID: ' + escapeHtml(group.id) + '</span>',
+          '<span class="pill">' + escapeHtml(formatDate(group.latestSummary.generatedAt)) + '</span>',
+          '<span class="pill">Mensagens: ' + group.latestSummary.messageCount + '</span>',
+          '</div>',
+          '<div class="preview">' + escapeHtml(group.latestSummary.preview || 'Sem preview') + '</div>',
+          '</article>',
+        ].join('');
+      }).join('');
+    }
+
+    function buildGroupCard(group) {
+      const summaryText = group.latestSummary ? escapeHtml(group.latestSummary.preview) : 'Sem resumo ainda.';
+      const messages = (group.recentMessages ?? []).slice(-5).reverse();
+      const messagesHtml = messages.length
+        ? messages.map((msg) => {
+            return '<div class="msg">' +
+              '<small>' + escapeHtml(formatDate(msg.ts) + ' · ' + (msg.senderName || msg.sender || 'unknown')) + '</small>' +
+              '<div>' + escapeHtml(msg.text || '[sem texto]') + '</div>' +
+            '</div>';
+          }).join('')
+        : '<div class="empty">Sem mensagens recentes nesta janela.</div>';
+
+      return [
+        '<article class="group">',
+        '<h3>' + escapeHtml(group.subject) + '</h3>',
+        '<div class="meta">',
+        '<span class="pill">ID: ' + escapeHtml(group.id) + '</span>',
+        '<span class="pill">Mensagens: ' + (group.recentMessages ?? []).length + '</span>',
+        '<span class="pill">Resumo: ' + (group.latestSummary ? 'sim' : 'não') + '</span>',
+        '</div>',
+        '<div class="preview">' + summaryText + '</div>',
+        '<div class="messages">' + messagesHtml + '</div>',
+        '</article>',
+      ].join('');
+    }
+
+    function render() {
+      const data = state.data;
+      const groups = getVisibleGroups();
+      const totalMessages = groups.reduce((sum, group) => sum + (group.recentMessages ?? []).length, 0);
+
+      elements.groups.innerHTML = '';
+      elements.summaryFeed.innerHTML = '';
+      elements.visibleCount.textContent = String(groups.length) + ' visíveis';
+      elements.messageCount.textContent = String(totalMessages);
+      elements.summaryWindow.textContent = data ? String(data.groups.length) + ' carregados' : '';
+
+      if (!data) {
+        elements.groups.innerHTML = '<div class="empty">Carregando estado do watcher...</div>';
+        elements.summaryFeed.innerHTML = '<div class="empty">Carregando resumos...</div>';
+        return;
+      }
+
+      elements.status.textContent = data.connectionStatus;
+      elements.watchedCount.textContent = String(data.watchedCount ?? 0);
+      elements.summaryCount.textContent = String(data.groups.filter((group) => group.latestSummary).length);
+      elements.updatedAt.textContent = formatDate(data.generatedAt);
+
+      elements.summaryFeed.innerHTML = buildSummaryFeed(groups);
+
+      if (!groups.length) {
+        elements.groups.innerHTML = '<div class="empty">Nenhum grupo corresponde ao filtro atual.</div>';
+        return;
+      }
+
+      elements.groups.innerHTML = groups.map(buildGroupCard).join('');
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch('api/state', { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
+
+        state.data = await res.json();
+        render();
+      } catch (error) {
+        state.data = null;
+        elements.status.textContent = 'offline';
+        elements.groups.innerHTML = '<div class="empty error">Falha ao carregar o dashboard: ' + escapeHtml(error?.message || String(error)) + '</div>';
+        elements.summaryFeed.innerHTML = '<div class="empty error">Falha ao carregar os resumos: ' + escapeHtml(error?.message || String(error)) + '</div>';
+      }
     }
 
     refresh();
