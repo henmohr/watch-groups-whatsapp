@@ -8,7 +8,7 @@
     Connects to a Baileys-based watcher and surfaces monitored WhatsApp group activity,
     summaries, and conversation context inside Nextcloud.
   ]]></description>
-  <version>0.1.3</version>
+  <version>0.1.4</version>
   <licence>agpl</licence>
   <author>Henmohr</author>
   <category>integration</category>

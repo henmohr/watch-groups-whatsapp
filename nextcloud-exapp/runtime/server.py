@@ -21,6 +21,8 @@ NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "").rstrip("/")
 WATCHER_API_URL = os.environ.get("WATCHER_API_URL", "http://watcher:3000").rstrip("/")
 PERSISTENT_STORAGE = Path(os.environ.get("APP_PERSISTENT_STORAGE", "/tmp/watchgroups"))
 TOP_MENU_NAME = "watchgroups-dashboard"
+TOP_MENU_SCRIPT_NAME = "watchgroups-dashboard"
+TOP_MENU_STYLE_NAME = "watchgroups-dashboard"
 ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" role=\"img\" aria-label=\"Watch Groups\">
   <defs>
     <linearGradient id=\"g\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">
@@ -34,6 +36,63 @@ ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" ro
   <circle cx=\"32\" cy=\"32\" r=\"3\" fill=\"#e5e7eb\" opacity=\".85\"/>
   <circle cx=\"38\" cy=\"32\" r=\"3\" fill=\"#e5e7eb\" opacity=\".7\"/>
 </svg>
+"""
+TOP_MENU_STYLE_CSS = """
+.watchgroups-app {
+  height: calc(100vh - 92px);
+  padding: 0;
+}
+
+.watchgroups-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+"""
+TOP_MENU_SCRIPT_JS = r"""
+(function () {
+  function proxyRoot() {
+    var path = window.location.pathname;
+    var embedded = /\/apps\/app_api\/embedded\/watchgroups\/watchgroups-dashboard\/?$/;
+    if (embedded.test(path)) {
+      return path.replace(embedded, '/apps/app_api/proxy/watchgroups/');
+    }
+
+    if (path.indexOf('/apps/app_api/proxy/watchgroups/') === 0) {
+      return path;
+    }
+
+    return '/apps/app_api/proxy/watchgroups/';
+  }
+
+  function mount() {
+    var target = document.getElementById('content') || document.body;
+    if (!target) {
+      return;
+    }
+
+    target.innerHTML = '';
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'watchgroups-app';
+
+    var frame = document.createElement('iframe');
+    frame.className = 'watchgroups-frame';
+    frame.title = 'Watch Groups WhatsApp';
+    frame.src = proxyRoot();
+
+    wrapper.appendChild(frame);
+    target.appendChild(wrapper);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount, { once: true });
+  } else {
+    mount();
+  }
+})();
 """
 
 
@@ -79,6 +138,24 @@ class Handler(BaseHTTPRequestHandler):
             data = ICON_SVG.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        if self.path == "/js/dashboard.js":
+            data = TOP_MENU_SCRIPT_JS.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        if self.path == "/css/dashboard.css":
+            data = TOP_MENU_STYLE_CSS.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/css; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -150,6 +227,22 @@ class Handler(BaseHTTPRequestHandler):
                 "adminRequired": "0",
             },
         )
+        self._post_nextcloud(
+            "/ocs/v2.php/apps/app_api/api/v1/ui/script",
+            {
+                "type": "top_menu",
+                "name": TOP_MENU_SCRIPT_NAME,
+                "path": "js/dashboard",
+            },
+        )
+        self._post_nextcloud(
+            "/ocs/v2.php/apps/app_api/api/v1/ui/style",
+            {
+                "type": "top_menu",
+                "name": TOP_MENU_STYLE_NAME,
+                "path": "css/dashboard",
+            },
+        )
 
     def unregister_top_menu(self) -> None:
         if not NEXTCLOUD_URL:
@@ -159,6 +252,22 @@ class Handler(BaseHTTPRequestHandler):
             "/ocs/v2.php/apps/app_api/api/v1/ui/top-menu",
             {
                 "name": TOP_MENU_NAME,
+            },
+        )
+        self._delete_nextcloud(
+            "/ocs/v2.php/apps/app_api/api/v1/ui/script",
+            {
+                "type": "top_menu",
+                "name": TOP_MENU_SCRIPT_NAME,
+                "path": "js/dashboard",
+            },
+        )
+        self._delete_nextcloud(
+            "/ocs/v2.php/apps/app_api/api/v1/ui/style",
+            {
+                "type": "top_menu",
+                "name": TOP_MENU_STYLE_NAME,
+                "path": "css/dashboard",
             },
         )
 
