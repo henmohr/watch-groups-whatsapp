@@ -38,8 +38,15 @@ ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\" ro
 </svg>
 """
 TOP_MENU_STYLE_CSS = """
+# The embedded AppAPI page provides #content, but its height is not guaranteed.
+# Give the dashboard a real viewport so the iframe cannot collapse to zero.
+#content {
+  min-height: calc(100vh - 50px) !important;
+}
+
 .watchgroups-app {
-  height: calc(100vh - 92px);
+  height: calc(100vh - 50px);
+  min-height: 400px;
   padding: 0;
 }
 
@@ -74,6 +81,7 @@ TOP_MENU_SCRIPT_JS = r"""
     }
 
     target.innerHTML = '';
+    target.style.minHeight = 'calc(100vh - 50px)';
 
     var wrapper = document.createElement('div');
     wrapper.className = 'watchgroups-app';
@@ -81,7 +89,10 @@ TOP_MENU_SCRIPT_JS = r"""
     var frame = document.createElement('iframe');
     frame.className = 'watchgroups-frame';
     frame.title = 'Watch Groups WhatsApp';
-    frame.src = proxyRoot();
+    frame.src = window.location.origin + proxyRoot();
+    frame.addEventListener('error', function () {
+      wrapper.textContent = 'Não foi possível carregar o dashboard do Watch Groups.';
+    });
 
     wrapper.appendChild(frame);
     target.appendChild(wrapper);
@@ -111,6 +122,14 @@ class Handler(BaseHTTPRequestHandler):
         data = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_html(self, status: int, html: str) -> None:
+        data = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -162,11 +181,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/" or self.path == "/watchgroups-dashboard/" or self.path == "/index.html":
-            self._send_text(200, render_dashboard())
+            self._send_html(200, render_dashboard())
             return
 
         if self.path.startswith("/watchgroups-dashboard/"):
-            self._send_text(200, render_dashboard())
+            self._send_html(200, render_dashboard())
             return
 
         self._send_text(404, "not found")
